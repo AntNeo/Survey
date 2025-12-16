@@ -13,9 +13,9 @@ def chat_to_string(chat:list, only_topic:int=None, until_topic:int=None) -> str:
         if until_topic and message['topic_idx'] == until_topic:
             break
         if message["type"] == "question":
-            topic_history += f'Interviewer: "{message['content']}"\n'
+            topic_history += f"Interviewer: \"{message['content']}\"\n"
         if message["type"] == "answer":
-            topic_history += f'Interviewee: "{message['content']}"\n'
+            topic_history += f"Interviewee: \"{message['content']}\"\n"
     return topic_history.strip()
 
 def fill_prompt_with_interview(template:str, topics:list, history:list, user_message:str=None) -> str:

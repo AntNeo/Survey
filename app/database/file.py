@@ -17,7 +17,7 @@ class FileWriter(object):
             logging.warning(f"Can't load session '{session_id}': not started!")
             return {}
         with open(filepath, 'r') as f:
-            session = json.load(f) 
+            session = json.load(f)
         return session
 
     def delete_remote_session(self, session_id:str):
@@ -25,15 +25,20 @@ class FileWriter(object):
         os.remove(os.path.join(DATA_DIR, f"{session_id}.json"))
         logging.info(f"Session '{session_id}' deleted!")
 
-    def update_remote_session(self, session_id:str, session:list):
+    def update_remote_session(self, session_id:str, session):
         """ Update or insert session data in the 'database'. """
-        assert 'session_id' in session[-1] and session[-1]['session_id'] == session_id
+        if isinstance(session, list):
+            assert 'session_id' in session[-1] and session[-1]['session_id'] == session_id
+        elif isinstance(session, dict):
+            assert session.get('session_id') == session_id
+        else:
+            raise TypeError("Session must be list or dict")
         with open(os.path.join(DATA_DIR, f"{session_id}.json"), 'w') as f:
             json.dump(session, f)
         logging.info(f"Session '{session_id}' updated!")
 
     def retrieve_sessions(self, sessions:list=None) -> list:
-        """ 
+        """
         Retrieve chat history (list of dicts) for specified sessions
         or *all* sessions if no sessions specified in optional argument.
 
@@ -51,9 +56,9 @@ class FileWriter(object):
             if sessions and not os.splitext(session_file)[0] in sessions: continue
             filepath = os.path.join(DATA_DIR, session_file)
             with open(filepath, 'r') as f:
-                session = json.load(f) 
+                session = json.load(f)
             # Add all messages in current interview session
-            chats.extend(session)
+            chats.extend(session if isinstance(session, list) else [session])
 
         logging.info(f"Retrieved {len(chats)} messages!")
         return chats

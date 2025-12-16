@@ -1,8 +1,11 @@
 import logging
 import os
 from parameters import INTERVIEW_PARAMETERS, OPENAI_API_KEY
+from surveys import SURVEYS
 from core.manager import InterviewManager
 from core.agent import LLMAgent
+from core.survey_engine import SurveyEngine
+
 
 def connect_to_database():
     """ Instantiate specific backend database. """
@@ -13,46 +16,66 @@ def connect_to_database():
     from database.file import FileWriter
     return FileWriter()
 
+
 agent = LLMAgent(OPENAI_API_KEY)
 db = connect_to_database()
+survey_engine = SurveyEngine(db, agent, SURVEYS)
+
 
 def load_interview_session(session_id:str) -> dict:
     """ Return interview session history to user. """
     return db.load_remote_session(session_id)
 
+
 def delete_interview_session(session_id:str):
     """ Delete existing interview saved to database. """
     db.delete_remote_session(session_id)
+
+
+def _validate_interview_parameters(parameters: dict):
+    if parameters.get('summarize') and 'summary' not in parameters:
+        raise KeyError("summarize=True but no 'summary' configuration provided")
+    for key in ['probe', 'transition']:
+        if key not in parameters:
+            raise KeyError(f"Missing required parameter block '{key}' for interview mode")
+
 
 def resume_interview_session(session_id:str, interview_id:str, user_message:str) -> InterviewManager:
     """ Return InterviewManager object of existing session. """
     interview = InterviewManager(db, session_id)
     interview.resume_session(INTERVIEW_PARAMETERS[interview_id])
+    _validate_interview_parameters(interview.parameters)
     logging.info("Generating next question for session '{}', user message '{}'".format(
-        session_id, 
+        session_id,
         user_message
-    ))   
+    ))
     return interview
+
 
 def begin_interview_session(session_id:str, interview_id:str) -> dict:
     """ Return response with starting question of new interview session. """
+    if interview_id in SURVEYS:
+        return survey_engine.begin_session(session_id, interview_id)
     if not INTERVIEW_PARAMETERS.get(interview_id):
         raise ValueError(f"Invalid interview parameters '{interview_id}' specified!")
     parameters = INTERVIEW_PARAMETERS[interview_id]
+    _validate_interview_parameters(parameters)
     interview = InterviewManager(db, session_id)
     interview.begin_session(parameters)
     message = parameters['first_question']
     interview.add_chat_to_session(message, type='question')
     logging.info("Beginning {} interview session '{}' with prompt '{}'".format(
-        interview_id, 
-        session_id, 
+        interview_id,
+        session_id,
         message
     ))
     return {'session_id':session_id, 'interview_id':interview_id, 'message':message}
 
+
 def retrieve_sessions(sessions:list=None) -> dict:
     """ Return specified or all existing interview sessions. """
     return db.retrieve_sessions(sessions)
+
 
 def transcribe(audio:str) -> dict:
     """ Return audio file transcription using OpenAI Whisper API """
@@ -60,6 +83,7 @@ def transcribe(audio:str) -> dict:
     transcription = agent.transcribe(audio)
     logging.info(f"Returning transcription text: '{transcription}'")
     return {'transcription':transcription}
+
 
 def next_question(session_id:str, interview_id:str, user_message:str=None) -> dict:
     """
@@ -72,6 +96,9 @@ def next_question(session_id:str, interview_id:str, user_message:str=None) -> di
     Returns:
         response: (dict) containing `message` from interviewer
     """
+
+    if interview_id in SURVEYS:
+        return survey_engine.next_step(session_id, interview_id, user_message)
 
     # Resume if interview has started, otherwise begin (new) session
     try:
@@ -100,7 +127,7 @@ def next_question(session_id:str, interview_id:str, user_message:str=None) -> di
 
         # If user message does not fit the interview context, give another chance
         if not on_topic: # but not flagged too often...
-            interview.update_session() 
+            interview.update_session()
             return {'session_id':session_id, 'message':parameters['off_topic_message']}
 
     """
@@ -157,5 +184,5 @@ def next_question(session_id:str, interview_id:str, user_message:str=None) -> di
             interview.terminate(reason="question_flagged")
             interview.update_session()
             return {'session_id':session_id, 'message':parameters['end_of_interview_message']}
-    
+
     return {'session_id':session_id, 'message':next_question}
